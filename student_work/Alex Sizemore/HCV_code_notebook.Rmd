@@ -1,0 +1,212 @@
+---
+title: "Analysis of Housing Choice Voucher Use in LA"
+output: html_notebook
+---
+Notebook Instruction:
+- Execute chunk using the *Run* button or pressing *Ctrl+Shift+Enter*. 
+- Click the *Insert Chunk* button on the toolbar or press *Ctrl+Alt+I* to insert chunk
+- When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or *Ctrl+Shift+K* to preview the HTML file).
+- The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+Document Description:
+
+This document includes as analysis of HCV data from 2017 through 2022. Data is publicly available from the HUD Assisted Housing: National and Local data set (https://www.huduser.gov/portal/datasets/assthsg.html). This analysis of HCV use in LA will inform further quantitative and qualitative data analysis
+
+
+Research Questions:
+
+This analysis will help answer the following research questions:
+
+RQ1: Who uses HCVs in LA and where are they used?
+
+RQ2: Has voucher use changed in LA since the 2019 source of income discrimination ban?
+
+
+Research Question #1:
+
+To answer RQ1, we will: 
+
+(1.1) Look at the overall usability of vouchers, or the number of vouchers available versus vouchers used annually between 2017 and 2022.
+
+(1.2) Consider geographic difference in voucher use, and how those differences shape the quality of life and access to opportunities for voucher households. To examine geographic differences in voucher use we will:
+  (1.2.1) Look at changes in voucher use over time by zip codes with Small Area Fair 
+  Market Rates (SAFMRs) at different levels relative to the annual Fair Market Rate     (FMR)
+  (1.2.2) Look at annual changes in voucher use by Service Planning Area (SPA)
+  (1.2.3) Percent of voucher households in and/or next to low poverty zip codes
+
+(1.3) Consider demographic differences within HCV households and between HCV households and the general population by:
+  (1.3.1) Comparing HCV demographics to the demographics of LA overall.
+  (1.3.2) Compare the demographics of HCV households in LA to the demographics of HCV 
+  households state and nationwide.
+  (1.3.3) Regress access to low-poverty neighborhoods by HCV households in LA by 
+  demographic characteristics
+
+Set-Up:
+
+To analyze any of the HCV data, we must first load and format the data.
+
+Load HCV data by year and SAFMR data
+```{r}
+Yr2021 <- read.csv("C:/Users/asizemor/Desktop/DisData/Yr2021.csv", header=TRUE)
+Yr2022 <- read.csv("C:/Users/asizemor/Desktop/DisData/Yr2022.csv", header=TRUE)
+Yr2020 <- read.csv("C:/Users/asizemor/Desktop/DisData/Yr2020.csv", header=TRUE)
+Yr2019 <- read.csv("C:/Users/asizemor/Desktop/DisData/Yr2019.csv", header=TRUE)
+Yr2018 <- read.csv("C:/Users/asizemor/Desktop/DisData/Yr2018.csv", header=TRUE)
+Yr2017 <- read.csv("C:/Users/asizemor/Desktop/DisData/Yr2017.csv", header=TRUE)
+LAZips <- read.csv("C:/Users/asizemor/Desktop/DisData/LAZips.csv", header=TRUE)
+SAFMR <- read.csv("C:/Users/asizemor/Desktop/DisData/SAFMR.csv", header=TRUE)
+```
+
+Add year to each HCV annual data set so they can be merged
+```{r}
+## add year value to all annual data so they can be merged)
+Yr2017$year = 2017
+Yr2018$year = 2018
+Yr2019$year = 2019
+Yr2020$year = 2020
+Yr2021$year = 2021
+Yr2022$year = 2022
+```
+
+
+Merge HCV annual data into one aggregate df
+```{r}
+Allyrs <- rbind(Yr2017, Yr2018, Yr2019, Yr2020, Yr2021, Yr2022)
+```
+
+Clean-up Allyrs df by removing columns without values
+```{r}
+Allyrs$gsl <- NULL
+Allyrs$longitude <- NULL
+Allyrs$latitude <- NULL
+Allyrs$state <- NULL
+Allyrs$ha_size <- NULL
+Allyrs$pha_total_units <- NULL
+Allyrs$place <- NULL
+Allyrs$fedhse <- NULL
+```
+
+Remove rows with summary data for all LA HUD programs by zip. Rename new df Allyrs_nosumm
+```{r}
+Allyrs_nosumm<-subset(Allyrs, program!=1)
+print(Allyrs_nosumm)
+```
+Check to make sure only HCV rows included, then delete column program which reflects the type of program. Also delete column sumlevel which reflects that the data exported is zipcode level
+```{r}
+any_other_than_3 <- any(Allyrs_nosumm$program != 3)
+print(any_other_than_3)
+Allyrs_nosumm$program <- NULL
+Allyrs_nosumm$sumlevel <- NULL
+```
+Rename 'entities' column to 'ZIP' in Allyrs_nosumm, then merge LA Allyrs_nosumm with LAzip so new df only has LA county data
+```{r}
+names(Allyrs_nosumm)[names(Allyrs_nosumm) == "entities"] <- "ZIP"
+LAyears <- merge(Allyrs_nosumm,LAZips['ZIP'])
+```
+
+Load packages needed for analysis
+```{r}
+library(ggplot2)
+library(dplyr)
+library(crayon)
+```
+
+Move years to be first column in LAyears. This section is commented out so this portion of teh code doesn't re-run, which will continue to reorder the columns.
+
+```{r}
+## Reorder columns to move the last column to the first position
+#LAyears <- LAyears[, c(ncol(LAyears), 1:(ncol(LAyears)-1))]
+#
+## Reorder columns to move the last column to the first position
+#LAyears <- LAyears[, c(ncol(LAyears), 1:(ncol(LAyears)-1))]
+#
+# Print updated LAyears data frame
+print(LAyears)
+```
+
+
+
+RQ 1.1 requires further data collection on the number of HCVs allocated in LA from 2017 through 2022. The current data set only includes the number of HCVs used.
+
+** NOTE: Revisit after collecting voucher allocation data. Some of this is publicly avail in press releases etc., but some may need to be requested from HUD. Check Phil & Jason's dataset **
+
+RQ 1.2 involves examining HCV use by geographic region. To do this we will develop fields to help conduct an analysis of zip codes where HCVs are used based on Service Planning Area (SPA), poverty level, and SAFMR.
+
+Merge SAFMR with LAyears using 2bedroom SAFMR rates:
+```{r}
+# Rename zipcode column in SAFMR so it matches format in LAyears
+names(SAFMR)[names(SAFMR) == "zip"] <- "ZIP"
+
+#Merge SAFMRs by year into LAyears
+LAyears <- merge(LAyears, SAFMR[, c("ZIP", "year", "X2bd")], by = "ZIP", "year", all.x = TRUE)
+
+# Rename the X2bed column to SAFMR_2bd
+names(LAyears)[names(LAyears) == "X2bd"] <- "SAFMR_2bd"
+
+# Print updated LAyears data frame
+print(LAyears)
+```
+
+Load and merge FMR data and move SAFMR and FMR columns to 2nd and 3rd column locations:
+
+```{r}
+#Load new df with FMR for years 2017 through 2022
+LAFMRS <- read.csv("C:/Users/asizemor/Desktop/DisData/LAFMRS.csv", header=TRUE)
+
+# Merge LAyears and LAFMRS
+LAyears <- merge(LAyears, LAFMRS[, c("year", "FMR_2bd")], by = "year", all.x = TRUE)
+
+# Rename the duplicated column
+names(LAyears)[names(LAyears) == "FMR_2bd.x"] <- "FMR_2bd_LAyears"
+names(LAyears)[names(LAyears) == "FMR_2bd.y"] <- "FMR_2bd_LAFMRS"
+
+# Get the index of the columns to be moved
+index_FMR <- which(names(LAyears) == "FMR_2bd_LAyears")
+index_SAFMR <- which(names(LAyears) == "SAFMR_2bd")
+
+# Move columns to the desired positions
+LAyears <- LAyears[, c(1, index_FMR, index_SAFMR, setdiff(seq_along(LAyears), c(1, index_FMR, index_SAFMR)))]
+
+#Delete duplicate column
+LAyears$year.y <- NULL
+
+# Print the updated LAyears data frame
+print(LAyears)
+
+```
+
+Remove dollar signs from FMRS 
+```{r}
+# Remove dollar signs for FMR and SAFMR columns
+LAyears$FMR_2bd <- as.numeric(gsub("[^0-9.]", "", LAyears$FMR_2bd))
+LAyears$SAFMR_2bd <- as.numeric(gsub("[^0-9.]", "", LAyears$SAFMR_2bd))
+
+# Convert columns to numeric if they are not already
+LAyears$FMR_2bd <- as.numeric(LAyears$FMR_2bd)
+LAyears$SAFMR_2bd <- as.numeric(LAyears$SAFMR_2bd)
+
+# Check for any non-numeric values in the columns
+if(any(is.na(LAyears$FMR_2bd_LAyears) | is.na(LAyears$SAFMR_2bd))) {
+  stop("One or more values in the columns are not numeric.")
+}
+
+# Calculate percentage of FMR_2bd relative to SAFMR_2bd
+LAyears$prc_fmr <- LAyears$FMR_2bd / LAyears$SAFMR_2bd
+
+# Print the updated LAyears data frame
+print(LAyears)
+```
+
+
+
+
+
+
+and create new variable reflecting that zip level ration between SAFMR and FMR:
+
+** NOTE: Revisit. Are there additional annual zip code level metrics that could be used to measure access to opportunity? **
+
+Limitations:
+
+Understanding the limitations of this data set can help inform how this analysis is interpreted, as well as future data collection and research needs. Limitations include:
+- Missing variables which are annonomyzed 
